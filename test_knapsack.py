@@ -1,7 +1,7 @@
 """Bộ kiểm thử: ca tự viết + đối chiếu với thư viện chuẩn (math, itertools).
 
-Chạy:  python tests/test_knapsack.py      (in bảng PASS/FAIL)
-   hoặc: python -m unittest discover -s tests
+Chạy:  python test_knapsack.py           (in bảng PASS/FAIL)
+   hoặc: python -m unittest test_knapsack -v
 Knapsack không có test vector NIST/RFC (hệ mã đã bị phá, không được chuẩn
 hoá), nên đối chiếu dùng các hàm thư viện chuẩn và vét cạn độc lập.
 """
@@ -127,6 +127,68 @@ class KnapsackTests(unittest.TestCase):
             with self.subTest(name):
                 expected, actual = fn()
                 self.assertEqual(expected, actual)
+
+
+    def test_issue4_ciphertext_plus_modulus_is_rejected(self):
+        pub, priv = generate_keys(8)
+        bits = bytes_to_bits(b"A")
+        original = encrypt_block(bits, pub)
+        self.assertEqual(decrypt_block(original, priv), bits)
+        with self.assertRaises(ValueError):
+            decrypt_block(original + priv.q, priv)
+
+    def test_issue4_invalid_ciphertext_types_are_rejected(self):
+        _, priv = generate_keys(8)
+        for value in (-1, "123", 1.5, True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                decrypt_block(value, priv)
+
+    def test_issue5_missing_file_has_friendly_error(self):
+        import subprocess
+        import tempfile
+        cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing = os.path.join(temp_dir, "missing_private_key.json")
+            result = subprocess.run(
+                [sys.executable, cli_path, "decrypt", "--priv", missing],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Lỗi:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_issue5_malformed_json_has_friendly_error(self):
+        import subprocess
+        import tempfile
+        cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bad_cipher = os.path.join(temp_dir, "bad_cipher.json")
+            with open(bad_cipher, "w", encoding="utf-8") as file:
+                file.write('[1, nope]')
+            # The CLI parses the input JSON before loading/decrypting the key.
+            result = subprocess.run(
+                [sys.executable, cli_path, "decrypt", "--priv", "unused.json", "--in", bad_cipher],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("JSON không hợp lệ", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_issue5_non_list_ciphertext_has_friendly_error(self):
+        import subprocess
+        import tempfile
+        cli_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cipher_path = os.path.join(temp_dir, "not_list.json")
+            with open(cipher_path, "w", encoding="utf-8") as file:
+                file.write('{"cipher": 123}')
+            result = subprocess.run(
+                [sys.executable, cli_path, "decrypt", "--priv", "unused.json", "--in", cipher_path],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("danh sách JSON", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 def main() -> int:
