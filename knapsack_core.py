@@ -99,7 +99,14 @@ def encrypt_block(bits: Sequence[int], pub: PublicKey) -> int:
 
 
 def decrypt_block(C: int, priv: PrivateKey) -> List[int]:
-    """Giải mã: C' = C * r^-1 mod q rồi giải knapsack siêu tăng bằng tham lam."""
+    """Giải mã một block và từ chối bản mã không có biểu diễn chuẩn.
+
+    Lưu ý: kiểm tra biểu diễn chuẩn không thay thế MAC/chữ ký số và không
+    phát hiện được mọi kiểu sửa đổi bản mã.
+    """
+    if type(C) is not int or C < 0:
+        raise ValueError("bản mã phải là số nguyên không âm")
+
     c = (C * priv.r_inv) % priv.q
     bits = [0] * priv.n
     for i in range(priv.n - 1, -1, -1):
@@ -107,5 +114,13 @@ def decrypt_block(C: int, priv: PrivateKey) -> List[int]:
             bits[i] = 1
             c -= priv.W[i]
     if c != 0:
-        raise ValueError("bản mã không hợp lệ với khoá này (phần dư khác 0)")
+        raise ValueError("bản mã không hợp lệ với khóa này (phần dư khác 0)")
+
+    # Dựng lại bản mã từ các bit vừa giải mã. Ví dụ C + q cho cùng kết quả
+    # modulo q, nhưng không phải biểu diễn chuẩn của block đã mã hóa.
+    public_weights = [(priv.r * w) % priv.q for w in priv.W]
+    canonical_C = sum(bit * b for bit, b in zip(bits, public_weights))
+    if C != canonical_C:
+        raise ValueError("bản mã không ở dạng chuẩn hoặc đã bị thay đổi")
+
     return bits
